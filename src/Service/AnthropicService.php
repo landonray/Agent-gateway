@@ -28,7 +28,7 @@ class AnthropicService
      * @param string $userApiKey    Ontraport API key forwarded to MCP
      * @param string $userAppId     Ontraport App ID forwarded to MCP
      *
-     * @return array{response: string, actions_taken: list<array{tool_name: string, summary: string}>, usage: array{input_tokens: int, output_tokens: int}, anthropic_latency_ms: int}
+     * @return array{response: string, actions_taken: list<array{tool_name: string, summary: string}>, usage: array{input_tokens: int, output_tokens: int}, anthropic_latency_ms: int, mcp_tool_latency_ms: int}
      */
     public function sendMessage(
         string $systemPrompt,
@@ -61,6 +61,7 @@ class AnthropicService
         // Extract text response
         $responseText = '';
         $actionsTaken = [];
+        $mcpToolLatencyMs = 0;
 
         foreach ($response['content'] ?? [] as $block) {
             if ($block['type'] === 'text') {
@@ -77,19 +78,21 @@ class AnthropicService
         // If the model wants to use tools, we need to handle the tool use loop
         if (($response['stop_reason'] ?? '') === 'tool_use') {
             $result = $this->handleToolLoop($response, $systemPrompt, $messages, $payload, $userApiKey, $userAppId);
-            $responseText   = $result['response'];
-            $actionsTaken   = $result['actions_taken'];
-            $response       = $result['final_response'];
+            $responseText     = $result['response'];
+            $actionsTaken     = $result['actions_taken'];
+            $mcpToolLatencyMs = $result['mcp_tool_latency_ms'];
+            $response         = $result['final_response'];
         }
 
         return [
-            'response'           => $responseText,
-            'actions_taken'      => $actionsTaken,
-            'usage'              => [
+            'response'             => $responseText,
+            'actions_taken'        => $actionsTaken,
+            'usage'                => [
                 'input_tokens'  => $response['usage']['input_tokens'] ?? 0,
                 'output_tokens' => $response['usage']['output_tokens'] ?? 0,
             ],
             'anthropic_latency_ms' => $latencyMs,
+            'mcp_tool_latency_ms'  => $mcpToolLatencyMs,
         ];
     }
 
@@ -97,7 +100,7 @@ class AnthropicService
      * Handle the agentic tool-use loop: Claude calls tools via MCP, we collect results
      * and re-send until Claude produces a final text response.
      *
-     * @return array{response: string, actions_taken: list<array{tool_name: string, summary: string}>, final_response: array<string, mixed>}
+     * @return array{response: string, actions_taken: list<array{tool_name: string, summary: string}>, mcp_tool_latency_ms: int, final_response: array<string, mixed>}
      */
     private function handleToolLoop(
         array $currentResponse,
@@ -107,11 +110,12 @@ class AnthropicService
         string $userApiKey,
         string $userAppId
     ): array {
-        $actionsTaken = [];
-        $messages     = $conversationMessages;
-        $response     = $currentResponse;
-        $maxIterations = 20;
-        $iteration     = 0;
+        $actionsTaken     = [];
+        $messages         = $conversationMessages;
+        $response         = $currentResponse;
+        $maxIterations    = 20;
+        $iteration        = 0;
+        $mcpToolLatencyMs = 0;
 
         while (($response['stop_reason'] ?? '') === 'tool_use' && $iteration < $maxIterations) {
             $iteration++;
@@ -128,12 +132,14 @@ class AnthropicService
                         'summary'   => $this->summarizeToolCall($block),
                     ];
 
+                    $toolStart  = microtime(true);
                     $toolResult = $this->executeMcpTool(
                         $block['name'],
                         $block['input'] ?? [],
                         $userApiKey,
                         $userAppId
                     );
+                    $mcpToolLatencyMs += (int) ((microtime(true) - $toolStart) * 1000);
 
                     $toolResults[] = [
                         'type'       => 'tool_result',
@@ -165,9 +171,10 @@ class AnthropicService
         }
 
         return [
-            'response'       => $responseText,
-            'actions_taken'  => $actionsTaken,
-            'final_response' => $response,
+            'response'            => $responseText,
+            'actions_taken'       => $actionsTaken,
+            'mcp_tool_latency_ms' => $mcpToolLatencyMs,
+            'final_response'      => $response,
         ];
     }
 

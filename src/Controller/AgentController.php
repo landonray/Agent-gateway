@@ -37,8 +37,10 @@ class AgentController
         $model          = $body['model'] ?? null;
 
         // Resolve conversation history
-        $isNewConversation = ($conversationId === null);
-        if ($isNewConversation) {
+        // When conversation_id is omitted, this is a single-turn interaction:
+        // generate an ID for the response but don't persist history.
+        $isSingleTurn = ($conversationId === null);
+        if ($isSingleTurn) {
             $conversationId = ConversationService::generateId();
             $history = [];
         } else {
@@ -77,24 +79,28 @@ class AgentController
             return;
         }
 
-        // Save conversation history
-        $this->conversation->saveHistory(
-            $conversationId,
-            $history,
-            $message,
-            $result['response']
-        );
+        // Save conversation history only for multi-turn interactions
+        if (!$isSingleTurn) {
+            $this->conversation->saveHistory(
+                $conversationId,
+                $history,
+                $message,
+                $result['response']
+            );
+        }
 
         $totalLatencyMs = (int) ((microtime(true) - $startTime) * 1000);
 
-        // Log request metrics
+        // Log request metrics (truncate message to 200 chars for privacy)
         $logger->info('Request completed', [
-            'app_id'              => $credentials['app_id'],
-            'conversation_id'     => $conversationId,
-            'tools_called'        => $result['actions_taken'],
-            'usage'               => $result['usage'],
-            'total_latency_ms'    => $totalLatencyMs,
+            'app_id'               => $credentials['app_id'],
+            'conversation_id'      => $conversationId,
+            'user_message'         => mb_substr($message, 0, 200),
+            'tools_called'         => $result['actions_taken'],
+            'usage'                => $result['usage'],
+            'total_latency_ms'     => $totalLatencyMs,
             'anthropic_latency_ms' => $result['anthropic_latency_ms'],
+            'mcp_tool_latency_ms'  => $result['mcp_tool_latency_ms'],
         ]);
 
         // Return response
