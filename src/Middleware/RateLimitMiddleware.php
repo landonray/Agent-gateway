@@ -5,61 +5,58 @@ declare(strict_types=1);
 namespace AgentGateway\Middleware;
 
 use AgentGateway\Logger;
+use Predis\Client as RedisClient;
 
 class RateLimitMiddleware
 {
-    /** @var array<string, array{minute_count: int, minute_reset: int, day_count: int, day_reset: int}> */
-    private static array $limits = [];
+    private static ?RedisClient $redis = null;
+
+    private static function getRedis(): RedisClient
+    {
+        if (self::$redis === null) {
+            self::$redis = new RedisClient($_ENV['REDIS_URL'] ?? 'redis://localhost:6379');
+        }
+        return self::$redis;
+    }
 
     public static function handle(string $appId, int $perMinute, int $perDay): bool
     {
+        $redis = self::getRedis();
         $now   = time();
-        $entry = self::$limits[$appId] ?? null;
 
-        if ($entry === null) {
-            $entry = [
-                'minute_count' => 0,
-                'minute_reset' => $now + 60,
-                'day_count'    => 0,
-                'day_reset'    => $now + 86400,
-            ];
+        // Per-minute check (sliding window via Redis key with TTL)
+        $minuteKey = "ratelimit:{$appId}:minute:" . intdiv($now, 60);
+        $minuteCount = (int) $redis->incr($minuteKey);
+        if ($minuteCount === 1) {
+            $redis->expire($minuteKey, 120); // TTL slightly longer than window
         }
 
-        // Reset windows if expired
-        if ($now > $entry['minute_reset']) {
-            $entry['minute_count'] = 0;
-            $entry['minute_reset'] = $now + 60;
-        }
-        if ($now > $entry['day_reset']) {
-            $entry['day_count'] = 0;
-            $entry['day_reset'] = $now + 86400;
-        }
-
-        if ($entry['minute_count'] >= $perMinute) {
+        if ($minuteCount > $perMinute) {
             Logger::get()->warning('Rate limit exceeded (per-minute)', ['app_id' => $appId]);
             http_response_code(429);
             echo json_encode([
                 'error'  => "Rate limit exceeded. Maximum {$perMinute} requests per minute.",
                 'status' => 429,
             ]);
-            self::$limits[$appId] = $entry;
             return false;
         }
 
-        if ($entry['day_count'] >= $perDay) {
+        // Per-day check (keyed by date)
+        $dayKey = "ratelimit:{$appId}:day:" . date('Y-m-d', $now);
+        $dayCount = (int) $redis->incr($dayKey);
+        if ($dayCount === 1) {
+            $redis->expire($dayKey, 90000); // ~25 hours
+        }
+
+        if ($dayCount > $perDay) {
             Logger::get()->warning('Rate limit exceeded (per-day)', ['app_id' => $appId]);
             http_response_code(429);
             echo json_encode([
                 'error'  => "Rate limit exceeded. Maximum {$perDay} requests per day.",
                 'status' => 429,
             ]);
-            self::$limits[$appId] = $entry;
             return false;
         }
-
-        $entry['minute_count']++;
-        $entry['day_count']++;
-        self::$limits[$appId] = $entry;
 
         return true;
     }

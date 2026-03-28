@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AgentGateway\Service;
 
 use Predis\Client as RedisClient;
-use AgentGateway\Logger;
 
 class ConversationService
 {
@@ -23,7 +22,7 @@ class ConversationService
     /**
      * Retrieve conversation history for a given conversation ID.
      *
-     * @return list<array{role: string, content: string}>
+     * @return list<array{role: string, content: mixed}>
      */
     public function getHistory(string $conversationId): array
     {
@@ -37,28 +36,27 @@ class ConversationService
     }
 
     /**
-     * Append a user message and assistant response to conversation history,
-     * capping at the configured max messages.
+     * Save the full messages array (including any tool_use/tool_result blocks)
+     * for a conversation, capping at the configured max messages.
      *
-     * @param list<array{role: string, content: string}> $history
+     * @param list<array{role: string, content: mixed}> $fullMessages  The complete messages array sent to Anthropic
+     * @param array<string, mixed>                      $assistantContent  The raw content array from Anthropic's response
      */
     public function saveHistory(
         string $conversationId,
-        array $history,
-        string $userMessage,
-        string $assistantResponse
+        array $fullMessages,
+        array $assistantContent
     ): void {
-        $history[] = ['role' => 'user', 'content' => $userMessage];
-        $history[] = ['role' => 'assistant', 'content' => $assistantResponse];
+        // Append the assistant response with its full content (text + tool_use blocks)
+        $fullMessages[] = ['role' => 'assistant', 'content' => $assistantContent];
 
         // Cap to last N messages
-        $maxEntries = $this->maxMessages * 2; // each turn = user + assistant
-        if (count($history) > $maxEntries) {
-            $history = array_slice($history, -$maxEntries);
+        if (count($fullMessages) > $this->maxMessages) {
+            $fullMessages = array_slice($fullMessages, -$this->maxMessages);
         }
 
         $key = "conversation:{$conversationId}";
-        $this->redis->set($key, json_encode($history));
+        $this->redis->set($key, json_encode($fullMessages));
         $this->redis->expire($key, $this->ttl);
     }
 

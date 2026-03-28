@@ -64,6 +64,31 @@ class AgentController
                 $credentials['api_key'],
                 $credentials['app_id']
             );
+        } catch (\InvalidArgumentException $e) {
+            $logger->error('Anthropic API bad request', [
+                'error'           => $e->getMessage(),
+                'conversation_id' => $conversationId,
+                'app_id'          => $credentials['app_id'],
+            ]);
+
+            http_response_code(400);
+            echo json_encode([
+                'error'  => 'Invalid request: ' . $e->getMessage(),
+                'status' => 400,
+            ]);
+            return;
+        } catch (\OverflowException $e) {
+            $logger->warning('Anthropic API rate limited', [
+                'conversation_id' => $conversationId,
+                'app_id'          => $credentials['app_id'],
+            ]);
+
+            http_response_code(429);
+            echo json_encode([
+                'error'  => 'Upstream rate limit exceeded. Please try again later.',
+                'status' => 429,
+            ]);
+            return;
         } catch (\RuntimeException $e) {
             $logger->error('Anthropic API call failed', [
                 'error'           => $e->getMessage(),
@@ -79,13 +104,14 @@ class AgentController
             return;
         }
 
-        // Save conversation history only for multi-turn interactions
+        // Save conversation history only for multi-turn interactions.
+        // Store the full messages array (including tool_use/tool_result blocks)
+        // so the conversation can be faithfully resumed.
         if (!$isSingleTurn) {
             $this->conversation->saveHistory(
                 $conversationId,
-                $history,
-                $message,
-                $result['response']
+                $result['full_messages'],
+                $result['response_content']
             );
         }
 

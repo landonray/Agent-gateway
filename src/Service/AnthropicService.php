@@ -86,6 +86,8 @@ class AnthropicService
 
         return [
             'response'             => $responseText,
+            'response_content'     => $response['content'] ?? [],
+            'full_messages'        => $messages,
             'actions_taken'        => $actionsTaken,
             'usage'                => [
                 'input_tokens'  => $response['usage']['input_tokens'] ?? 0,
@@ -261,7 +263,7 @@ class AnthropicService
             CURLOPT_HTTPHEADER     => [
                 'Content-Type: application/json',
                 "x-api-key: {$this->apiKey}",
-                'anthropic-version: 2023-06-01',
+                'anthropic-version: 2025-04-14',
             ],
             CURLOPT_POSTFIELDS => json_encode($payload),
             CURLOPT_TIMEOUT    => 120,
@@ -279,17 +281,26 @@ class AnthropicService
 
         curl_close($ch);
 
+        $decoded = json_decode((string) $result, true);
+
+        if ($httpCode === 429) {
+            throw new \OverflowException('Anthropic API rate limit exceeded');
+        }
+
         if ($httpCode >= 500) {
             throw new \RuntimeException("Anthropic API returned HTTP {$httpCode}");
         }
 
-        $decoded = json_decode((string) $result, true);
         if (!is_array($decoded)) {
             throw new \RuntimeException('Invalid response from Anthropic API');
         }
 
         if (isset($decoded['error'])) {
-            throw new \RuntimeException('Anthropic API error: ' . ($decoded['error']['message'] ?? 'unknown'));
+            $msg = $decoded['error']['message'] ?? 'unknown';
+            if ($httpCode >= 400 && $httpCode < 500) {
+                throw new \InvalidArgumentException("Anthropic API bad request: {$msg}");
+            }
+            throw new \RuntimeException("Anthropic API error: {$msg}");
         }
 
         return $decoded;
