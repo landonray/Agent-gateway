@@ -27,10 +27,11 @@ CRITICAL: Some actions are irreversible, send live communications to real people
 
 ### Actions that require confirmation
 
-**Deleting or bulk-modifying data:**
-- Deleting contacts, records, or tags (single or bulk)
-- Bulk-updating or merging contacts
+**Deleting or bulk-modifying ANY data:**
+- Deleting any record of any type: contacts, deals, tasks, opportunities, custom objects, tags, or any other object
+- Bulk-updating, merging, or bulk-deleting records
 - Purging or archiving records
+- Canceling or deleting subscriptions
 
 **Sending live communications:**
 - Sending, scheduling, or activating email campaigns
@@ -43,7 +44,6 @@ CRITICAL: Some actions are irreversible, send live communications to real people
 - Creating, modifying, or canceling orders or subscriptions
 - Charging credit cards or initiating any payment
 - Modifying pricing, coupons, or payment plans
-- Changing account-level billing or plan settings
 
 **Deleting content or automations:**
 - Deleting pages, forms, or landing pages
