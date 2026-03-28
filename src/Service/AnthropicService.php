@@ -75,12 +75,21 @@ class AnthropicService
             }
         }
 
+        // Track usage — for single-call responses, just use response usage.
+        // For tool loops, accumulate across all iterations.
+        $usage = [
+            'input_tokens'  => $response['usage']['input_tokens'] ?? 0,
+            'output_tokens' => $response['usage']['output_tokens'] ?? 0,
+        ];
+
         // If the model wants to use tools, we need to handle the tool use loop
         if (($response['stop_reason'] ?? '') === 'tool_use') {
             $result = $this->handleToolLoop($response, $systemPrompt, $messages, $payload, $userApiKey, $userAppId);
             $responseText     = $result['response'];
             $actionsTaken     = $result['actions_taken'];
             $mcpToolLatencyMs = $result['mcp_tool_latency_ms'];
+            $messages         = $result['full_messages'];
+            $usage            = $result['total_usage'];
             $response         = $result['final_response'];
         }
 
@@ -89,10 +98,7 @@ class AnthropicService
             'response_content'     => $response['content'] ?? [],
             'full_messages'        => $messages,
             'actions_taken'        => $actionsTaken,
-            'usage'                => [
-                'input_tokens'  => $response['usage']['input_tokens'] ?? 0,
-                'output_tokens' => $response['usage']['output_tokens'] ?? 0,
-            ],
+            'usage'                => $usage,
             'anthropic_latency_ms' => $latencyMs,
             'mcp_tool_latency_ms'  => $mcpToolLatencyMs,
         ];
@@ -102,7 +108,7 @@ class AnthropicService
      * Handle the agentic tool-use loop: Claude calls tools via MCP, we collect results
      * and re-send until Claude produces a final text response.
      *
-     * @return array{response: string, actions_taken: list<array{tool_name: string, summary: string}>, mcp_tool_latency_ms: int, final_response: array<string, mixed>}
+     * @return array{response: string, actions_taken: list<array{tool_name: string, summary: string}>, mcp_tool_latency_ms: int, full_messages: array, total_usage: array{input_tokens: int, output_tokens: int}, final_response: array<string, mixed>}
      */
     private function handleToolLoop(
         array $currentResponse,
@@ -118,6 +124,8 @@ class AnthropicService
         $maxIterations    = 20;
         $iteration        = 0;
         $mcpToolLatencyMs = 0;
+        $totalInputTokens  = $response['usage']['input_tokens'] ?? 0;
+        $totalOutputTokens = $response['usage']['output_tokens'] ?? 0;
 
         while (($response['stop_reason'] ?? '') === 'tool_use' && $iteration < $maxIterations) {
             $iteration++;
@@ -162,6 +170,10 @@ class AnthropicService
             ];
 
             $response = $this->request('/v1/messages', $payload);
+
+            // Accumulate token usage across all iterations
+            $totalInputTokens  += $response['usage']['input_tokens'] ?? 0;
+            $totalOutputTokens += $response['usage']['output_tokens'] ?? 0;
         }
 
         // Extract final text
@@ -176,6 +188,11 @@ class AnthropicService
             'response'            => $responseText,
             'actions_taken'       => $actionsTaken,
             'mcp_tool_latency_ms' => $mcpToolLatencyMs,
+            'full_messages'       => $messages,
+            'total_usage'         => [
+                'input_tokens'  => $totalInputTokens,
+                'output_tokens' => $totalOutputTokens,
+            ],
             'final_response'      => $response,
         ];
     }
