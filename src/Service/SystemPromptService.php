@@ -45,10 +45,9 @@ CRITICAL: Some actions are irreversible, send live communications to real people
 - Modifying pricing, coupons, or payment plans
 - Changing account-level billing or plan settings
 
-**Destructive configuration changes:**
-- Deleting pages, forms, landing pages, or automation maps
-- Modifying or deleting automation maps, sequences, or campaigns
-- Changing account-level settings, API keys, or user permissions
+**Deleting content or automations:**
+- Deleting pages, forms, or landing pages
+- Deleting or deactivating automation maps, sequences, or campaigns
 
 ### How to confirm
 
