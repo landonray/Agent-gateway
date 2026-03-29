@@ -52,7 +52,7 @@ POST /api/v1/agent
 
 ### Prerequisites
 
-- PHP 8.2+
+- PHP 7.4+
 - Composer
 - Redis (for conversation history)
 
